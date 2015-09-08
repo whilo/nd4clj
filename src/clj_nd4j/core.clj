@@ -1,19 +1,52 @@
 (ns clj-nd4j.core
-  (:require [clojure.core.matrix.protocols :refer :all]
+  (:require [clojure.core.matrix.protocols :as mp]
+            [clojure.core.matrix :as m]
             [clojure.core.matrix.implementations :as imp])
   (:import [org.nd4j.linalg.factory Nd4j]))
 
+;; TODO: eliminate reflection warnings
+(set! *warn-on-reflection* true)
+;; (set! *unchecked-math* true)
+
+(declare canonical-object)
 
 (defn vs? [m] (or (vector? m) (seq? m)))
 
+(defn coerce-nd4j 
+  "Coreces an arbitrary array to an ND$J value"
+  (^org.nd4j.linalg.api.ndarray.INDArray [a]
+    (if (instance? org.nd4j.linalg.api.ndarray.INDArray a)
+               a (mp/construct-matrix canonical-object a))))
+
+(defn- column-major-strides
+  ^ints [shape]
+  (let [shape (int-array shape)
+        n (alength shape)
+        strides (int-array n)]
+    (areduce shape i st 1
+             (do 
+               (aset strides i (int st))
+               (* st (aget shape i))))
+    strides))
+
+(defn- row-major-strides
+  ^ints [shape]
+  (let [shape (int-array shape)
+        n (alength shape)
+        strides (int-array n)]
+    (areduce shape i st 1
+             (let [ix (- (dec n) i)] 
+               (aset strides ix (int st))
+               (* st (aget shape ix))))
+    strides))
 
 (extend-type org.nd4j.linalg.api.ndarray.INDArray
-  PImplementation
-  (implementation-key [m] :nd4j)
-  (meta-info [m] {:doc "nd4j implementation of the core.matrix
+  mp/PImplementation
+  (mp/implementation-key [m] :nd4j)
+  (mp/meta-info [m] {:doc "nd4j implementation of the core.matrix
   protocols. Allows different backends, e.g. jblas or jcublas for
   graphic cards."})
-  (construct-matrix [m data]
+  (mp/construct-matrix [m data]
     "Returns a new n-dimensional array containing the given data. data should be in the form of either
      nested sequences or a valid existing array.
 
@@ -23,113 +56,99 @@
       - Return nil to indicate that a default implementation should be used instead
 
      0-dimensional arrays / scalars are permitted."
-    (if (vs? data)
-      (if (vs? (first data))
-        (if (vs? (first (first data)))
-          (throw (ex-info "Only 2-dimensional tensors are allowed."
-                          {:data data}))
-          (->> data
-               (map (partial into-array Double/TYPE))
-               into-array
-               Nd4j/create))
-        (Nd4j/create (double-array data)))
-      data))
-  (new-vector [m length]
+    (let [^ints shape (int-array (m/shape data))
+          ;; _ (println (str "Creating ND4J array of shape: " (vec shape)))
+          ^doubles dbs (m/to-double-array data)
+          arr (Nd4j/create dbs (int-array shape) (row-major-strides shape) 0 \c)]
+      (if (= (vec shape) (vec (.shape arr)))
+        arr ;; array sucessfully created
+        nil ;; sometimes ND4J implementations can't create the correct shape.... 
+        )))
+  (mp/new-vector [m length]
     "Returns a new vector (1D column matrix) of the given length, filled with numeric zero."
-    (Nd4j/create length))
-  (new-matrix [m rows columns]
+    (Nd4j/create (int length)))
+  (mp/new-matrix [m rows columns]
     "Returns a new matrix (regular 2D matrix) with the given number of rows and columns, filled with numeric zero."
-    (Nd4j/create rows columns))
-  (new-matrix-nd [m shape]
+    (Nd4j/create (int rows) (int columns)))
+  (mp/new-matrix-nd [m shape]
     "Returns a new general matrix of the given shape.
      Must return nil if the shape is not supported by the implementation.
      Shape must be a sequence of dimension sizes."
-    (let [[a b c] shape]
-      (if c nil
-          (if b (Nd4j/create a b)
-              (if a (Nd4j/create a)
-                  (throw (ex-info "Don't know how to create empty shape."
-                                  {:shape shape})))))))
-  (supports-dimensionality? [m dimensions]
+    (let [^ints shape (int-array shape)
+          ;; _ (println (str "Creating ND4J array of shape: " (vec shape)))
+          arr (Nd4j/create shape)]
+      (if (= shape (.shape arr))
+        arr ;; array sucessfully created
+        nil ;; sometimes ND4J implementations can't create the correct shape.... 
+        )))
+  (mp/supports-dimensionality? [m dimensions]
     "Returns true if the implementation supports matrices with the given number of dimensions."
-    (or (= dimensions 1) (= dimensions 2)))
+    ;; we support all dimensionalities since we are a full nd-array implementation
+    true)
 
-  PDimensionInfo
-  (dimensionality [m]
+  mp/PDimensionInfo
+  (mp/dimensionality [m]
     "Returns the number of dimensions of an array"
     (count (.shape m)))
-  (get-shape [m]
+  (mp/get-shape [m]
     "Returns the shape of the array, typically as a Java array or sequence of dimension sizes.
      Implementations are free to choose what type is used to represent the shape, but it must
      contain only integer values and be traversable as a sequence via clojure.core/seq"
     (.shape m))
-  (is-scalar? [m]
+  (mp/is-scalar? [m]
     "Tests whether an object is a scalar value, i.e. a value that can exist at a
      specific position in an array."
-    (= (count (.shape m)) 0))
-  (is-vector? [m]
+    ;; An ND4J NDArray is never a scalar (though it may potentially be a 0-dimensional-array?)
+    false)
+  (mp/is-vector? [m]
     "Tests whether an object is a vector (1D array)"
     (= (count (.shape m)) 1))
-  (dimension-count [m dimension-number]
+  (mp/dimension-count [m dimension-number]
     "Returns the size of a specific dimension. Must throw an exception if the array does not
      have the specified dimension."
-    (nth (.shape m) dimension-number))
+    (aget (.shape m) (long dimension-number)))
 
-  PIndexedAccess
-  (get-1d [m row]
-    (.getDouble m row))
-  (get-2d [m row column]
-    (.getDouble m row column))
-  (get-nd [m indexes]
-    (let [ci (count indexes)
-          [r c] indexes]
-      (case ci
-        1 (.getDouble m r)
-        2 (.getDouble m r c)
-        (throw (ex-info "nd4j only supports 2 dimensional matrices."
-                        {:indexes indexes
-                         :matrix m})))))
+  mp/PIndexedAccess
+  (mp/get-1d [m row]
+    (.getDouble m (int row)))
+  (mp/get-2d [m row column]
+    (.getDouble m (int row) (int column)))
+  (mp/get-nd [m indexes]
+    (let [ixs (int-array indexes)]
+      (.getDouble m ixs)))
 
-
-  PIndexedSetting
-  (set-1d [m row v]
-    (let [d (.dup m)]
-      (.put d row v)))
-  (set-2d [m row column v]
-    (let [d (.dup m)]
-      (.put d row column v)))
-  (set-nd [m indexes v]
+  mp/PIndexedSetting
+  (mp/set-1d [m row v]
     (let [d (.dup m)
-          ci (count indexes)
-          [r c] indexes]
-      (case ci
-        1 (.put d r v)
-        2 (.put d r c v)
-        (throw (ex-info "nd4j only supports 2 dimensional matrices."
-                        {:indexes indexes
-                         :matrix m})))))
-  (is-mutable? [m] false)
+          ixs (int-array [row])]
+      (.putScalar d ixs (double v))))
+  (mp/set-2d [m row column v]
+    (let [d (.dup m)
+          ixs (int-array [row column])]
+      (.putScalar d ixs (double v))))
+  (mp/set-nd [m indexes v]
+    (let [d (.dup m)
+          indexes (int-array indexes)]
+      (.putScalar d indexes (double v))))
+  (mp/is-mutable? [m] false)
 
-  PTypeInfo
-  (element-type [m] Double/TYPE)
+  mp/PTypeInfo
+  (mp/element-type [m] Double/TYPE)
 
-  PMatrixMultiply
-  (matrix-multiply [m a]
-    (.mmul m (if (isa? (type a) org.nd4j.linalg.api.ndarray.INDArray)
-               a (construct-matrix m a))))
-  (element-multiply [m a]
-    (.mul m a))
+  mp/PMatrixMultiply
+  (mp/matrix-multiply [m a]
+    (.mmul m ^org.nd4j.linalg.api.ndarray.INDArray (coerce-nd4j a)))
+  (mp/element-multiply [m a]
+    (.mul m ^org.nd4j.linalg.api.ndarray.INDArray (coerce-nd4j a)))
 
-  PMatrixProducts
-  (inner-product [m a]
-    (.mmul m (.transpose (if (isa? (type a) org.nd4j.linalg.api.ndarray.INDArray)
-                           a (construct-matrix m a)))))
-  (outer-product [m a]
-    (.mmul (.transpose m) (if (isa? (type a) org.nd4j.linalg.api.ndarray.INDArray)
-                            a (construct-matrix m a)))))
+  mp/PMatrixProducts
+  (mp/inner-product [m a]
+    (.mmul m (coerce-nd4j a)))
+  (mp/outer-product [m a]
+    (coerce-nd4j (mp/outer-product (mp/coerce-param [] m) a))))
 
-
-(imp/register-implementation (Nd4j/create 4 2))
+(def canonical-object (Nd4j/create 4 2))
+(imp/register-implementation canonical-object)
 
 (comment
   (require '[clojure.reflect :refer [reflect]]
@@ -174,3 +193,4 @@
     (.put m 1 3.0))
 
   )
+
