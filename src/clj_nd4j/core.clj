@@ -108,11 +108,14 @@
      have the specified dimension."
     (aget (.shape m) (long dimension-number)))
 
+  ;; TODO: for some reason the [row] and [row,column] accessors trigger an ND4J bug?
   mp/PIndexedAccess
   (mp/get-1d [m row]
-    (.getDouble m (int row)))
+    (let [ixs (int-array [row])]
+      (.getDouble m ixs)))
   (mp/get-2d [m row column]
-    (.getDouble m (int row) (int column)))
+    (let [ixs (int-array [row column])]
+      (.getDouble m ixs)))
   (mp/get-nd [m indexes]
     (let [ixs (int-array indexes)]
       (.getDouble m ixs)))
