@@ -6,6 +6,6 @@
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [net.mikera/core.matrix "0.36.1"]
                  [net.mikera/core.matrix.testing "0.0.4"]
-                 [org.nd4j/nd4j-jblas "0.0.3.5.5.6-SNAPSHOT"]
+                 [org.nd4j/nd4j-jblas "0.0.3.5.5.5"]
                  #_[org.nd4j/jcublas "6.5"]
                  #_[org.nd4j/nd4j-jcublas-6.5 "0.0.3.5.5.6-SNAPSHOT"]])
