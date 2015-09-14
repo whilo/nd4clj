@@ -12,8 +12,8 @@
 
 (defn vs? [m] (or (vector? m) (seq? m)))
 
-(defn coerce-nd4j 
-  "Coreces an arbitrary array to an ND$J value"
+(defn coerce-nd4j
+  "Coreces an arbitrary array to an ND4J value"
   (^org.nd4j.linalg.api.ndarray.INDArray [a]
     (if (instance? org.nd4j.linalg.api.ndarray.INDArray a)
                a (mp/construct-matrix canonical-object a))))
@@ -24,7 +24,7 @@
         n (alength shape)
         strides (int-array n)]
     (areduce shape i st 1
-             (do 
+             (do
                (aset strides i (int st))
                (* st (aget shape i))))
     strides))
@@ -35,7 +35,7 @@
         n (alength shape)
         strides (int-array n)]
     (areduce shape i st 1
-             (let [ix (- (dec n) i)] 
+             (let [ix (- (dec n) i)]
                (aset strides ix (int st))
                (* st (aget shape ix))))
     strides))
@@ -62,7 +62,7 @@
           arr (Nd4j/create dbs (int-array shape) (row-major-strides shape) 0 \c)]
       (if (= (vec shape) (vec (.shape arr)))
         arr ;; array sucessfully created
-        nil ;; sometimes ND4J implementations can't create the correct shape.... 
+        nil ;; sometimes ND4J implementations can't create the correct shape....
         )))
   (mp/new-vector [m length]
     "Returns a new vector (1D column matrix) of the given length, filled with numeric zero."
@@ -79,7 +79,7 @@
           arr (Nd4j/create shape)]
       (if (= shape (.shape arr))
         arr ;; array sucessfully created
-        nil ;; sometimes ND4J implementations can't create the correct shape.... 
+        nil ;; sometimes ND4J implementations can't create the correct shape....
         )))
   (mp/supports-dimensionality? [m dimensions]
     "Returns true if the implementation supports matrices with the given number of dimensions."
@@ -175,6 +175,11 @@
 
   (.transpose ndmul)
 
+  (mp/construct-matrix canonical-object [[1 0] [0 1]])
+
+  (clojure.core.matrix/set-current-implementation :nd4j)
+
+  (clojure.core.matrix/matrix [[1 0] [0 1]])
 
 
   (map :name (:members (reflect (new-vector (Nd4j/create 4 2) 3))))
@@ -196,4 +201,3 @@
     (.put m 1 3.0))
 
   )
-
