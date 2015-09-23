@@ -40,6 +40,12 @@
                (* st (aget shape ix))))
     strides))
 
+(defn get-shape [^org.nd4j.linalg.api.ndarray.INDArray m]
+  (let [s (.shape m)]
+    (cond (.isScalar m) []
+          (.isVector m) (vec (rest s))
+          :else (vec s))))
+
 (extend-type org.nd4j.linalg.api.ndarray.INDArray
   mp/PImplementation
   (mp/implementation-key [m] :nd4j)
@@ -60,10 +66,13 @@
           ;; _ (println (str "Creating ND4J array of shape: " (vec shape)))
           ^doubles dbs (m/to-double-array data)
           arr (Nd4j/create dbs (int-array shape) (row-major-strides shape) 0 \c)]
-      (if (= (vec shape) (vec (.shape arr)))
+      (when-not (= (vec shape) (get-shape arr))
+        (throw (ex-info "Shape mismatch" {:shape (vec shape)
+                                          :actual-shape (vec (.shape arr))})))
+
         arr ;; array sucessfully created
-        nil ;; sometimes ND4J implementations can't create the correct shape....
-        )))
+;;        nil ;; sometimes ND4J implementations can't create the correct shape....
+        ))
   (mp/new-vector [m length]
     "Returns a new vector (1D column matrix) of the given length, filled with numeric zero."
     (Nd4j/create (int length)))
@@ -77,7 +86,7 @@
     (let [^ints shape (int-array shape)
           ;; _ (println (str "Creating ND4J array of shape: " (vec shape)))
           arr (Nd4j/create shape)]
-      (if (= shape (.shape arr))
+      (if (= shape (mp/get-shape arr))
         arr ;; array sucessfully created
         nil ;; sometimes ND4J implementations can't create the correct shape....
         )))
@@ -94,19 +103,19 @@
     "Returns the shape of the array, typically as a Java array or sequence of dimension sizes.
      Implementations are free to choose what type is used to represent the shape, but it must
      contain only integer values and be traversable as a sequence via clojure.core/seq"
-    (.shape m))
+    (get-shape m))
   (mp/is-scalar? [m]
     "Tests whether an object is a scalar value, i.e. a value that can exist at a
      specific position in an array."
     ;; An ND4J NDArray is never a scalar (though it may potentially be a 0-dimensional-array?)
-    false)
+    (= (count (get-shape m)) 0))
   (mp/is-vector? [m]
     "Tests whether an object is a vector (1D array)"
-    (= (count (.shape m)) 1))
+    (= (count (get-shape m)) 1))
   (mp/dimension-count [m dimension-number]
     "Returns the size of a specific dimension. Must throw an exception if the array does not
      have the specified dimension."
-    (aget (.shape m) (long dimension-number)))
+    (get (get-shape m) (long dimension-number)))
 
   ;; TODO: for some reason the [row] and [row,column] accessors trigger an ND4J bug?
   mp/PIndexedAccess
@@ -155,7 +164,9 @@
 
 (comment
   (require '[clojure.reflect :refer [reflect]]
-           '[clojure.pprint :refer [pprint]])
+           '[clojure.pprint :refer [pprint]]
+           '[clojure.core.matrix :as mat]
+           '[clojure.core.matrix.compliance-tester :as ct])
 
 
   (defn into-matrix [vec-of-vecs]
@@ -169,9 +180,12 @@
 
   (def nd2 (into-matrix [[1 1] [1 1] [1 1]]))
 
+  (get-shape nd2)
+
   (def ndmul (.mmul nd1 nd2))
 
-
+  (mat/mul (mat/matrix [[1 0 0] [0 1 0]])
+           (mat/matrix [[2 0] [0 1] [3 0]]))
 
   (.transpose ndmul)
 
@@ -179,7 +193,8 @@
 
   (clojure.core.matrix/set-current-implementation :nd4j)
 
-  (clojure.core.matrix/matrix [[1 0] [0 1]])
+
+  (ct/compliance-test (mat/matrix [[1 0] [0 1]]))
 
 
   (map :name (:members (reflect (new-vector (Nd4j/create 4 2) 3))))
@@ -196,8 +211,10 @@
                    (construct-matrix foo [[1 2]
                                           [3 4]]))
 
+  (seq (.shape (Nd4j/create (double-array [1 2]) (int-array [2 1 1]) (int-array [1]) 0 \c)))
+
+  (vec (.shape (Nd4j/create 1 4)))
+
   (let [m (construct-matrix foo [[1 0]
                                  [0 1]])]
-    (.put m 1 3.0))
-
-  )
+    (.put m 1 3.0)))
