@@ -1,4 +1,4 @@
-(ns clj-nd4j.core
+(ns nd4clj.core
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.implementations :as imp])
@@ -42,9 +42,14 @@
 
 (defn get-shape [^org.nd4j.linalg.api.ndarray.INDArray m]
   (let [s (.shape m)]
-    (cond (.isScalar m) []
+    (vec s)
+    #_(cond (.isScalar m) []
           (.isVector m) (vec (rest s))
           :else (vec s))))
+
+#_(let [shape (int-array [1 4])
+      dbs (m/to-double-array [[1 2 3 4]])]
+  (.isVector (Nd4j/create dbs (int-array shape) (row-major-strides shape) 0 \c)))
 
 (extend-type org.nd4j.linalg.api.ndarray.INDArray
   mp/PImplementation
@@ -66,13 +71,15 @@
           ;; _ (println (str "Creating ND4J array of shape: " (vec shape)))
           ^doubles dbs (m/to-double-array data)
           arr (Nd4j/create dbs (int-array shape) (row-major-strides shape) 0 \c)]
+      #_(.setShape arr shape)
       (when-not (= (vec shape) (get-shape arr))
-        (throw (ex-info "Shape mismatch" {:shape (vec shape)
-                                          :actual-shape (vec (.shape arr))})))
+        (throw (ex-info "Shape mismatch" {:data data
+                                          :shape (vec shape)
+                                          :actual-shape [(get-shape arr) (vec (.shape arr))]})))
 
-        arr ;; array sucessfully created
-;;        nil ;; sometimes ND4J implementations can't create the correct shape....
-        ))
+      arr ;; array sucessfully created
+      ;;        nil ;; sometimes ND4J implementations can't create the correct shape....
+      ))
   (mp/new-vector [m length]
     "Returns a new vector (1D column matrix) of the given length, filled with numeric zero."
     (Nd4j/create (int length)))
@@ -86,10 +93,13 @@
     (let [^ints shape (int-array shape)
           ;; _ (println (str "Creating ND4J array of shape: " (vec shape)))
           arr (Nd4j/create shape)]
-      (if (= shape (mp/get-shape arr))
-        arr ;; array sucessfully created
-        nil ;; sometimes ND4J implementations can't create the correct shape....
-        )))
+      #_(.setShape arr shape)
+      ;; sometimes ND4J implementations can't create the correct shape....
+      (when (= shape (mp/get-shape arr))
+        (throw (ex-info "Wrong shape created:" {:shape shape
+                                                :actual (mp/get-shape arr)})))
+      arr ;; array sucessfully created
+      ))
   (mp/supports-dimensionality? [m dimensions]
     "Returns true if the implementation supports matrices with the given number of dimensions."
     ;; we support all dimensionalities since we are a full nd-array implementation
@@ -98,7 +108,7 @@
   mp/PDimensionInfo
   (mp/dimensionality [m]
     "Returns the number of dimensions of an array"
-    (count (.shape m)))
+    (count (get-shape m)))
   (mp/get-shape [m]
     "Returns the shape of the array, typically as a Java array or sequence of dimension sizes.
      Implementations are free to choose what type is used to represent the shape, but it must
@@ -108,14 +118,18 @@
     "Tests whether an object is a scalar value, i.e. a value that can exist at a
      specific position in an array."
     ;; An ND4J NDArray is never a scalar (though it may potentially be a 0-dimensional-array?)
-    (= (count (get-shape m)) 0))
+    (zero? (count (get-shape m))))
   (mp/is-vector? [m]
     "Tests whether an object is a vector (1D array)"
     (= (count (get-shape m)) 1))
   (mp/dimension-count [m dimension-number]
     "Returns the size of a specific dimension. Must throw an exception if the array does not
      have the specified dimension."
-    (get (get-shape m) (long dimension-number)))
+    (let [shape (get-shape m)
+          c (count shape)]
+      (when (> dimension-number c)
+        (throw (ex-info "Dimension out of range." {:shape shape})))
+      (get shape (long dimension-number))))
 
   ;; TODO: for some reason the [row] and [row,column] accessors trigger an ND4J bug?
   mp/PIndexedAccess
@@ -149,9 +163,17 @@
 
   mp/PMatrixMultiply
   (mp/matrix-multiply [m a]
-    (.mmul m ^org.nd4j.linalg.api.ndarray.INDArray (coerce-nd4j a)))
+    (let [^org.nd4j.linalg.api.ndarray.INDArray a (coerce-nd4j a)]
+      (cond (and (.isRowVector m) (.isRowVector a))
+            (.mmul m (.transpose a))
+
+            :else
+            (.mmul m a)
+            #_(and (.isRowVector m) (.isColumnVector a))
+            )))
   (mp/element-multiply [m a]
-    (.mul m ^org.nd4j.linalg.api.ndarray.INDArray (coerce-nd4j a)))
+    (let [^org.nd4j.linalg.api.ndarray.INDArray a (coerce-nd4j a)]
+      (.mul m a)))
 
   mp/PMatrixProducts
   (mp/inner-product [m a]
@@ -165,7 +187,7 @@
 (comment
   (require '[clojure.reflect :refer [reflect]]
            '[clojure.pprint :refer [pprint]]
-           '[clojure.core.matrix :as mat]
+           '[clojure.core.matrix :refer [matrix mmul] :as mat]
            '[clojure.core.matrix.compliance-tester :as ct])
 
 
@@ -182,20 +204,44 @@
 
   (get-shape nd2)
 
+
   (def ndmul (.mmul nd1 nd2))
 
-  (mat/mul (mat/matrix [[1 0 0] [0 1 0]])
-           (mat/matrix [[2 0] [0 1] [3 0]]))
+  (mat/mmul (mat/matrix [[2 0] [0 1] [3 0]])
+            (mat/matrix [[1 0 0] [0 1 0]]))
 
   (.transpose ndmul)
 
-  (mp/construct-matrix canonical-object [[1 0] [0 1]])
+  (get-shape (mp/construct-matrix canonical-object [1 0] ))
+
+  (get-shape (.reshape (mp/construct-matrix canonical-object [[1 0]] ) (int-array [2])))
 
   (clojure.core.matrix/set-current-implementation :nd4j)
 
 
+  (mmul (matrix [1 2 3]) (matrix [1 2 3])) ; vector times vector
+                                        ; => 14
+  (mmul (matrix [[1 2 3]]) (matrix [[1] [2] [3]])) ; multiplication of matrices as row and column vectors
+                                        ; => [[14]]
+  (mmul (matrix [1 2 3]) (matrix [[1] [2] [3]])) ; vector times column vector
+                                        ; => [14]
+  (mmul (matrix [[1 2 3]]) (matrix [1 2 3])) ; row vector times vector
+                                        ; => [14]
+  (mmul (matrix [[1 2 3][4 5 6][7 8 9]]) (matrix [[1] [2] [3]])) ; matrix times column vector
+                                        ; => [[14] [32] [50]]
+  (mmul (matrix [[1 2 3][4 5 6][7 8 9]]) (matrix [1 2 3])) ; matrix times vector
+                                        ; => [14 32 50]
+  (mmul (matrix [1 2 3]) (matrix [[1 2 3]])) ; vector treated as row vector times row vector
+                                        ; => RuntimeException Mismatched vector sizes ...
+  (mmul (matrix [[1] [2] [3]]) (matrix [1 2 3])) ; column vector times
+                                        ; vector treated as column vector => RuntimeException Mismatched
+                                        ; vector sizes ...
+
+
   (ct/compliance-test (mat/matrix [[1 0] [0 1]]))
 
+  (let [{:keys [shape actual-shape]} (ex-data *e)]
+    (= shape actual-shape))
 
   (map :name (:members (reflect (new-vector (Nd4j/create 4 2) 3))))
 

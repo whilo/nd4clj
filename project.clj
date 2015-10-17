@@ -1,6 +1,6 @@
-(defproject clj-nd4j "0.1.0-SNAPSHOT"
+(defproject nd4clj "0.1.0-SNAPSHOT"
   :description "An implementation of core.matrix protocols with nd4j."
-  :url "https://github.com/whilo/clj-nd4j"
+  :url "https://github.com/whilo/nd4clj"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.7.0"]

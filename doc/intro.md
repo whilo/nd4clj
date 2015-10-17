@@ -1,3 +1,3 @@
-# Introduction to clj-nd4j
+# Introduction to nd4clj
 
 TODO: write [great documentation](http://jacobian.org/writing/what-to-write/)
